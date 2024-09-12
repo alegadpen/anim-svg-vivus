@@ -7,40 +7,53 @@
 describe('Vivus', function () {
 
   var ObjectElementMock,
+    triggerFrames,
     myVivus,
     objTag,
     wrapTag,
     svgTag,
-    svgTagId = 'my-svg';
+    svgTagId = 'my-svg',
+    svgGroupTagId = 'my-svg-group';
 
   // Mock ObjectElement and it's constructor via createElement
   ObjectElementMock = function () {
     this.loadCb = [];
     this.attr = {};
     this.addEventListener = function (evtName, cb) {
-      if (evtName === 'load') this.loadCb.push(cb);
-    }
+      if (evtName === 'load') {
+        this.loadCb.push(cb);
+      }
+    };
     this.loaded = function () {
       for (var i = 0; i < this.loadCb.length; i++) {
         this.loadCb[i]({target: this});
       }
-    }
+    };
     this.getBoundingClientRect = function () {
       return {
         height: 11,
         top: 364
       };
-    }
-    this.insertBefore = function () {}
-    this.removeChild = function () {}
+    };
+    this.insertBefore = function () {};
+    this.removeChild = function () {};
     this.setAttribute = function (key, val) {
       this.attr[key] = val;
-    }
+    };
     this.getAttribute = function (key) {
       return this.attr[key];
-    }
+    };
   };
   window.HTMLObjectElement = ObjectElementMock;
+
+  triggerFrames = function (counter) {
+    counter = counter || -1;
+    while (window.requestAnimFrameStack.length && counter !== 0) {
+      window.requestAnimFrameStack.shift()();
+      counter--;
+    }
+  };
+
 
   beforeEach(function () {
     // Create the SVG
@@ -48,7 +61,7 @@ describe('Vivus', function () {
     svgTag.id = svgTagId;
     svgTag.innerHTML = '<circle fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" cx="100" cy="100" r="72.947"/>' +
       '<circle fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" cx="100" cy="100" r="39.74"/>' +
-      '<g>' +
+      '<g id="' + svgGroupTagId + '">' +
         '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="34.042" y1="131.189" x2="67.047" y2="77.781"/>' +
         '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="165.957" y1="68.809" x2="132.953" y2="122.219"/>' +
         '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="131.19" y1="165.957" x2="77.781" y2="132.953"/>' +
@@ -59,6 +72,9 @@ describe('Vivus', function () {
     wrapTag.appendChild(svgTag);
 
     document.body.appendChild(wrapTag);
+
+    // Reset the request anim frame stack
+    window.requestAnimFrameStack = [];
   });
 
   afterEach(function () {
@@ -116,6 +132,12 @@ describe('Vivus', function () {
       }).not.toThrow();
     });
 
+    it('should work with the SVG group object', function () {
+      expect(function () {
+        new Vivus(svgGroupTagId);
+      }).not.toThrow();
+    });
+
     it('should throw an error if the SVG ID given is invalid', function () {
       expect(function () {
         new Vivus('my-unexisting-svg');
@@ -133,12 +155,13 @@ describe('Vivus', function () {
 
     it('should accept any DOM element if `file` option is set', function () {
       var divTag = document.createElement('div');
+      spyOn(window, 'XMLHttpRequest');
       try {
         new Vivus(divTag, {file: 'opensource.svg'});
       }
       catch(err) {}
 
-      expect(!!divTag.querySelector('object')).toBe(true);
+      expect(window.XMLHttpRequest).toHaveBeenCalled();
     });
 
     it('should throw an error if the element is not a correct type (DOM object or string)', function () {
@@ -188,7 +211,7 @@ describe('Vivus', function () {
     it('should throw an error if the SVG file does not exists', function () {
       objTag = new ObjectElementMock();
       objTag.contentDocument = document.createElement('div');
-      var myVivus = new Vivus(objTag);
+      new Vivus(objTag);
       expect(function () {
         objTag.loaded();
       }).toThrow();
@@ -269,6 +292,29 @@ describe('Vivus', function () {
         new Vivus(svgTag, {}, 42);
       }).toThrow(new Error('Vivus [constructor]: "callback" parameter must be a function'));
     });
+
+    it('should use scale to determine path length when vector effect is non-scaling-stroke', function () {
+      var scalingSvgTag = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      var scalingWrapTag = document.createElement('div');
+
+      scalingSvgTag.setAttribute('viewBox', '0 0 500 200');
+      scalingWrapTag.style.width = '1000px';
+
+      scalingSvgTag.id = 'scaling-stroke-test';
+
+      scalingSvgTag.innerHTML = '<path vector-effect="non-scaling-stroke" fill="none" stroke="#f9f9f9" stroke-width="3" d="M0,68.57346635098205L20.833333333333332,3.8875909891199285L41.666666666666664,47.366000806779425L62.5,57.171841641625065L83.33333333333333"/>' +
+        '<path fill="none" stroke="#f9f9f9" stroke-width="3" d="M0,68.57346635098205L20.833333333333332,3.8875909891199285L41.666666666666664,47.366000806779425L62.5,57.171841641625065L83.33333333333333"/>';
+
+      scalingWrapTag.appendChild(scalingSvgTag);
+
+      document.body.appendChild(scalingWrapTag);
+
+      myVivus = new Vivus(scalingSvgTag);
+
+      expect(myVivus.map.length).toEqual(2);
+      expect(myVivus.map[0].length).toEqual(280);
+      expect(myVivus.map[1].length).toEqual(141);
+    });
   });
 
   describe('[engine]', function () {
@@ -276,13 +322,20 @@ describe('Vivus', function () {
     // Mapping
     describe('Mapping:', function () {
 
-      it('shoud create a mapping of the SVG', function () {
+      it('should not trigger any error if the SVG is empty', function () {
+        expect(function () {
+          var svgTag = document.createElementNS('http://www.w3.org/2000/svg','svg');
+          myVivus = new Vivus(svgTag, {});
+        }).not.toThrow();
+      });
+
+      it('should create a mapping of the SVG', function () {
         myVivus = new Vivus(svgTag, {});
         expect(myVivus.map && myVivus.map.length).toEqual(6);
       });
 
       it('should map with correct values for start and duration', function () {
-        var i, typeIndex, types = ['delayed', 'async', 'oneByOne', 'scenario', 'scenario-sync'];
+        var i, typeIndex, types = ['delayed', 'sync', 'oneByOne', 'scenario', 'scenario-sync'];
         for (typeIndex in types) {
           myVivus = new Vivus(svgTag, {type: types[typeIndex], duration: 200});
           for (i in myVivus.map) {
@@ -308,8 +361,8 @@ describe('Vivus', function () {
           SVGPathElement.prototype.getTotalLength = getTotalLengthBkp;
           console.warn = warnBkp;
         });
-        
-        it('shoud call console.warn if a path length is NaN', function () {
+
+        it('should call console.warn if a path length is NaN', function () {
           var warnSpy = jasmine.createSpy('spy');
           console.warn = warnSpy;
           myVivus = new Vivus(svgTag);
@@ -317,7 +370,7 @@ describe('Vivus', function () {
           expect(myVivus.map.length).toEqual(0);
         });
 
-        it('shoudn\'t call console.warn if not defined a path length is NaN', function () {
+        it('shouldn\'t call console.warn if not defined a path length is NaN', function () {
           console.warn = null;
           myVivus = new Vivus(svgTag);
           expect(myVivus.map.length).toEqual(0);
@@ -341,7 +394,7 @@ describe('Vivus', function () {
       });
 
       it('should not accept a path which is not displayed', function () {
-        svgTag.childNodes[1].setAttribute('data-ignore', 'false')
+        svgTag.childNodes[1].setAttribute('data-ignore', 'false');
         myVivus = new Vivus(svgTag);
         expect(myVivus.map.length).toEqual(6);
       });
@@ -350,86 +403,160 @@ describe('Vivus', function () {
     // Drawing
     describe('Drawing:', function () {
 
-      it('should call the callback once the animation is finished', function (done) {
+      it('should call the callback once the animation is finished', function () {
+        var done = false;
         myVivus = new Vivus(svgTag, {
-          type: 'oneByOne',
-          duration: 2,
+          duration: 6,
           start: 'autostart'
         }, function () {
-          expect(true).toBe(true);
-          done();
+          done = true;
         });
+
+        triggerFrames();
+        expect(done).toBe(true);
       });
 
-      it('should call the callback once the reverse animation is finished', function (done) {
+      it('should call the callback once the reverse animation is finished', function () {
+        var done = false;
         myVivus = new Vivus(svgTag, {
           type: 'oneByOne',
-          duration: 2
+          duration: 6
         }, function () {
-          expect(true).toBe(true);
-          done();
+          done = true;
         });
 
         myVivus.finish().play(-1);
+        triggerFrames();
+        expect(done).toBe(true);
       });
 
-      it('should call destroy method once the animation is finished', function (done) {
-        var destroySpy = jasmine.createSpy('spy');
+      it('should call the method callback as the second param once the animation is finished', function () {
+        var done = false;
         myVivus = new Vivus(svgTag, {
-          type: 'oneByOne',
-          duration: 2,
+          duration: 6,
+          start: 'manual',
+        });
+
+        myVivus.play(1, function() {
+          done = true;
+        });
+        triggerFrames();
+        expect(done).toBe(true);
+      });
+
+      it('should call the method callback as the first param once the animation is finished', function () {
+        var done = false;
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
+          start: 'manual',
+        });
+
+        myVivus.play(function() {
+          done = true;
+        });
+        triggerFrames();
+        expect(done).toBe(true);
+      });
+
+      it('should call the method callback once the reverse animation is finished', function () {
+        var done = false;
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
+          start: 'manual',
+        });
+
+        myVivus.finish().play(-1, function() {
+          done = true;
+        });
+        triggerFrames();
+        expect(done).toBe(true);
+      });
+
+      it('should call the method callback provided in the last play call', function () {
+        var done = false;
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
+          start: 'manual',
+        });
+
+        myVivus.finish().play(-1, function () {});
+        myVivus.play(function() {
+          done = true;
+        });
+        triggerFrames();
+        expect(done).toBe(true);
+      });
+
+      it('should call destroy method once the animation is finished', function () {
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
           start: 'manual',
           selfDestroy: true
-        }, function () {
-          expect(destroySpy.calls.count()).toEqual(1);
-          done();
         });
-        myVivus.destroy = destroySpy;
+        myVivus.destroy = jasmine.createSpy('spy');
         myVivus.play();
+        triggerFrames();
+        expect(myVivus.destroy.calls.count()).toEqual(1);
       });
 
-      it('should\' call destroy method if selfDestroy option is not present', function (done) {
-        var destroySpy = jasmine.createSpy('spy');
+      it('should\' call destroy method if selfDestroy option is not present', function () {
         myVivus = new Vivus(svgTag, {
-          type: 'oneByOne',
-          duration: 2,
+          duration: 6,
           start: 'manual'
-        }, function () {
-          expect(destroySpy.calls.count()).toEqual(0);
-          done();
         });
-        myVivus.destroy = destroySpy;
+        myVivus.destroy = jasmine.createSpy('spy');
         myVivus.play();
+        triggerFrames();
+        expect(myVivus.destroy.calls.count()).toEqual(0);
       });
 
-      it('should stop the animation once it reaches currentFrame == 0', function (done) {
+      it('should stop animation if destroy has been called', function () {
+        var callbackSpy = jasmine.createSpy('spy');
         myVivus = new Vivus(svgTag, {
-          type: 'oneByOne',
-          duration: 2,
+          duration: 6,
+          start: 'autostart'
+        }, callbackSpy);
+
+        triggerFrames(1);
+        myVivus.destroy();
+
+        triggerFrames();
+        expect(callbackSpy.calls.count()).toEqual(0);
+      });
+
+      it('should stop the animation once it reaches currentFrame == 0', function () {
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
           start: 'manual'
         });
-        myVivus.stop = function () {
-          expect(true).toBe(true);
-          done();
-        };
+        myVivus.stop = jasmine.createSpy('spy');
         myVivus.play(-1);
+        triggerFrames();
+        expect(myVivus.stop.calls.count()).toEqual(1);
       });
 
-      it('should trace reasonably', function (done) {
-        var callCount = 0;
+      it('should trace reasonably', function () {
+        myVivus = new Vivus(svgTag, {
+          duration: 6,
+          start: 'manual'
+        });
+        spyOn(myVivus, 'trace').and.callThrough();
+        myVivus.play(0.5);
+        triggerFrames();
+        expect(myVivus.trace.calls.count()).toEqual(12);
+      });
 
+      it('should start by the last path if reverseStack is enabled', function () {
         myVivus = new Vivus(svgTag, {
           type: 'oneByOne',
-          duration: 2,
-          start: 'manual'
-        }, function () {
-          expect(callCount).toEqual(4);
-          done();
+          duration: 5,
+          reverseStack: true
         });
-        spyOn(myVivus, 'trace').and.callFake(function() {
-          callCount++;
-        });
-        myVivus.play(0.5);
+        myVivus.setFrameProgress(0.5);
+
+        var paths = svgTag.querySelectorAll('path');
+        expect(+paths[0].style.strokeDashoffset).not.toEqual(0);
+        expect(+paths[paths.length -1].style.strokeDashoffset).toEqual(0);
       });
     });
 
@@ -437,7 +564,7 @@ describe('Vivus', function () {
 
       it('should use renderPath if forceRender option is set to true', function () {
         myVivus = new Vivus(svgTag, { duration: 2, start: 'manual', forceRender: true });
-        
+
         var originalFirstPath = myVivus.map[0].el;
         myVivus.renderPath(0);
         expect(myVivus.map[0].el).not.toBe(originalFirstPath);
@@ -445,7 +572,7 @@ describe('Vivus', function () {
 
       it('should not use renderPath if forceRender option is set to false', function () {
         myVivus = new Vivus(svgTag, { duration: 2, start: 'manual', forceRender: false });
-        
+
         var originalFirstPath = myVivus.map[0].el;
         myVivus.renderPath(0);
         expect(myVivus.map[0].el).toBe(originalFirstPath);
@@ -493,30 +620,24 @@ describe('Vivus', function () {
       expect(myVivus.speed).toEqual(1);
     });
 
-    it('shouldn\'t run another process of drawing if the animation is in progress', function (done) {
-      var callCount = 0;
-
+    it('shouldn\'t run another process of drawing if the animation is in progress', function () {
       myVivus = new Vivus(svgTag, {
-        type: 'oneByOne',
-        duration: 2,
+        duration: 6,
         start: 'manual'
-      }, function () {
-        expect(callCount).toEqual(4);
-        done();
       });
-
-      spyOn(myVivus, 'trace').and.callFake(function() {
-        callCount++;
-      });
+      spyOn(myVivus, 'trace').and.callThrough();
 
       myVivus.play(0.5);
       myVivus.play(0.5);
-      myVivus.play(0.5);
-      myVivus.play(0.5);
-      myVivus.play(0.5);
+      triggerFrames();
+      expect(myVivus.trace.calls.count()).toEqual(12);
     });
 
     it('should stop the animation only when the animation is running', function () {
+      myVivus = new Vivus(svgTag, {
+        duration: 6,
+        start: 'manual'
+      });
       myVivus.play();
       expect(myVivus.handle).toBeTruthy();
       myVivus.stop();
@@ -535,7 +656,6 @@ describe('Vivus', function () {
         expect(!!paths[i].style.strokeDasharray).toEqual(false);
       }
     });
-
 
     /**
      * Where are the tests about `util` methods?

@@ -7,7 +7,9 @@
 describe('Pathformer', function () {
 
   var svgTag,
-    svgTagId = 'my-svg';
+    svgTagId = 'my-svg',
+    svgGroupTag,
+    svgGroupTagId = 'my-svg-group';
 
   beforeEach(function () {
     // Remove tag if existing
@@ -18,13 +20,17 @@ describe('Pathformer', function () {
 
     // Create the SVG
     svgTag = document.createElementNS('http://www.w3.org/2000/svg','svg');
-    svgTag.id = 'my-svg';
+    svgTag.id = svgTagId;
     svgTag.innerHTML = '<circle fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" cx="100" cy="100" r="72.947"/>' +
       '<circle fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" cx="100" cy="100" r="39.74"/>' +
+      '<g id="' + svgGroupTagId + '">' +
       '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="34.042" y1="131.189" x2="67.047" y2="77.781"/>' +
       '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="165.957" y1="68.809" x2="132.953" y2="122.219"/>' +
       '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="131.19" y1="165.957" x2="77.781" y2="132.953"/>' +
-      '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="68.81" y1="34.042" x2="122.219" y2="67.046"/>';
+      '<line fill="none" stroke="#f9f9f9" stroke-width="3" stroke-miterlimit="10" x1="68.81" y1="34.042" x2="122.219" y2="67.046"/>' +
+      '</g>';
+
+    svgGroupTag = svgTag.querySelector('#'+svgGroupTagId);
 
     // Insert it to the body
     document.body.appendChild(svgTag);
@@ -48,6 +54,12 @@ describe('Pathformer', function () {
     it('should work with only the SVG object', function () {
       expect(function () {
         new Pathformer(svgTag);
+      }).not.toThrow();
+    });
+
+    it('should work with only the SVG group object', function () {
+      expect(function () {
+        new Pathformer(svgGroupTag);
       }).not.toThrow();
     });
 
@@ -89,6 +101,14 @@ describe('Pathformer', function () {
         var output = Pathformer.prototype.lineToPath({});
         expect(output.d.substr(-1)).not.toEqual('Z');
       });
+
+      it('should set default positino attributes to zero', function () {
+        var output = Pathformer.prototype.lineToPath({
+          x1: '21', x2: '32', y1: '11'
+        });
+        expect(output.d.indexOf('0')).not.toEqual(-1);
+        expect(output.d.indexOf('undefined')).toEqual(-1);
+      });
     });
 
     // Rect object
@@ -102,13 +122,52 @@ describe('Pathformer', function () {
         var output = Pathformer.prototype.rectToPath({});
         expect(output.d.substr(-1)).toEqual('Z');
       });
+
+      it('should set default positino attributes to zero', function () {
+        var output = Pathformer.prototype.rectToPath({
+          x: '21', height: '32', width: '11'
+        });
+        expect(output.d.indexOf('0')).not.toEqual(-1);
+        expect(output.d.indexOf('undefined')).toEqual(-1);
+      });
+
+      it('should apply rounded corners', function () {
+        var result = 'M 50,10 ' +
+          'L 50,10 A 40,20,0,0,1,90,30 ' +
+          'L 90,50 A 40,20,0,0,1,50,70 ' +
+          'L 50,70 A 40,20,0,0,1,10,50 ' +
+          'L 10,30 A 40,20,0,0,1,50,10';
+
+        var output = Pathformer.prototype.rectToPath({
+          x:10, y:10, width:80, height:60, rx:100, ry:20
+        });
+
+        expect(output.d).toEqual(result);
+      });
+
+      it('should apply rounded corners even when a value is missing', function () {
+        var result = 'M 30,10 ' +
+          'L 70,10 A 20,20,0,0,1,90,30 ' +
+          'L 90,50 A 20,20,0,0,1,70,70 ' +
+          'L 30,70 A 20,20,0,0,1,10,50 ' +
+          'L 10,30 A 20,20,0,0,1,30,10';
+
+        var output = Pathformer.prototype.rectToPath({
+          x:10, y:10, width:80, height:60,  ry:20
+        });
+
+        expect(output.d).toEqual(result);
+      });
     });
 
     // Polyline object
     describe('polyline', function () {
-      var polyline = {
-        points: '2,3 4,5 6,7'
-      };
+      var polyline;
+      beforeEach(function () {
+        polyline = {
+          points: '2,3 4,5 6,7'
+        };
+      });
 
       it('should return an object with a `d` attribute', function () {
         var output = Pathformer.prototype.polylineToPath(polyline);
@@ -136,9 +195,12 @@ describe('Pathformer', function () {
 
     // Polygon object
     describe('polygon', function () {
-      var polygon = {
+      var polygon;
+      beforeEach(function () {
+        polygon = {
           points: '2,3 4,5 6,7'
         };
+      });
 
       it('should return an object with a `d` attribute', function () {
         var output = Pathformer.prototype.polygonToPath(polygon);
@@ -153,11 +215,15 @@ describe('Pathformer', function () {
 
     // Ellipse object
     describe('ellipse', function () {
-      var ellipse = {
-        cx: 2,
-        cy: 3,
-        rx: 3
-      };
+
+      var ellipse;
+      beforeEach(function () {
+        ellipse = {
+          cx: 2,
+          cy: 3,
+          rx: 3
+        };
+      });
 
       it('should return an object with a `d` attribute', function () {
         var output = Pathformer.prototype.ellipseToPath(ellipse);
@@ -167,17 +233,28 @@ describe('Pathformer', function () {
       it('should return an object with an unclosed shape', function () {
         var output = Pathformer.prototype.ellipseToPath(ellipse);
         expect(output.d.substr(-1)).not.toEqual('Z');
+      });
+
+      it('should set default positino attributes to zero', function () {
+        delete ellipse.cy;
+        var output = Pathformer.prototype.ellipseToPath(ellipse);
+        expect(output.d.indexOf('0')).not.toEqual(-1);
+        expect(output.d.indexOf('undefined')).toEqual(-1);
       });
     });
 
     // Circle object
     describe('circle', function () {
-      var circle = {
-        cx: 2,
-        cy: 3,
-        rx: 3,
-        r: 1
-      };
+
+      var circle;
+      beforeEach(function () {
+        circle = {
+          cx: 2,
+          cy: 3,
+          rx: 3,
+          r: 1
+        };
+      });
 
       it('should return an object with a `d` attribute', function () {
         var output = Pathformer.prototype.circleToPath(circle);
@@ -187,6 +264,13 @@ describe('Pathformer', function () {
       it('should return an object with an unclosed shape', function () {
         var output = Pathformer.prototype.circleToPath(circle);
         expect(output.d.substr(-1)).not.toEqual('Z');
+      });
+
+      it('should set default positino attributes to zero', function () {
+        delete circle.cy;
+        var output = Pathformer.prototype.circleToPath(circle);
+        expect(output.d.indexOf('0')).not.toEqual(-1);
+        expect(output.d.indexOf('undefined')).toEqual(-1);
       });
     });
   });
